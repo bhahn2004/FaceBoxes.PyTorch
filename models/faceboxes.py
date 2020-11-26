@@ -55,7 +55,9 @@ class CRelu(nn.Module):
   def forward(self, x):
     x = self.conv(x)
     x = self.bn(x)
-    x = torch.cat([x, -x], 1)
+    # NOTE: this overcomes lack of translation target for "Neg" pytorch2keras
+    x_neg = 0 - x 
+    x = torch.cat([x, x_neg], 1)
     x = F.relu(x, inplace=True)
     return x
 
@@ -80,6 +82,9 @@ class FaceBoxes(nn.Module):
 
     self.conv4_1 = BasicConv2d(256, 128, kernel_size=1, stride=1, padding=0)
     self.conv4_2 = BasicConv2d(128, 256, kernel_size=3, stride=2, padding=1)
+
+    self.flatten_1 = [nn.Flatten()] * 3
+    self.flatten_2 = [nn.Flatten()] * 3
 
     self.loc, self.conf = self.multibox(self.num_classes)
 
@@ -136,8 +141,11 @@ class FaceBoxes(nn.Module):
         loc.append(l(x).permute(0, 2, 3, 1).contiguous())
         conf.append(c(x).permute(0, 2, 3, 1).contiguous())
 
-    loc = torch.cat([o.view(o.size(0), -1) for o in loc], 1)
-    conf = torch.cat([o.view(o.size(0), -1) for o in conf], 1)
+    # NOTE: this fixes the reordering issue due to pytorch2keras
+    #loc = torch.cat([o.view(o.size(0), -1) for o in loc], 1)
+    #conf = torch.cat([o.view(o.size(0), -1) for o in conf], 1)
+    loc = torch.cat([self.flatten_1[i](o) for i, o in enumerate(loc)], 1)
+    conf = torch.cat([self.flatten_2[i](o) for i, o in enumerate(conf)], 1)
 
     if self.phase == "test":
       output = (loc.view(loc.size(0), -1, 4),
@@ -145,5 +153,9 @@ class FaceBoxes(nn.Module):
     else:
       output = (loc.view(loc.size(0), -1, 4),
                 conf.view(conf.size(0), -1, self.num_classes))
+
+    output = torch.cat((conf.view(conf.size(0), -1, self.num_classes),
+                        loc.view(loc.size(0), -1, 4)), -1)
+    #output = torch.cat((conf, loc), -1)
 
     return output
